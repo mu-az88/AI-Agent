@@ -1,0 +1,11 @@
+# Environment variables - never commit secrets
+.env
+
+# Virtual environment
+venv/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

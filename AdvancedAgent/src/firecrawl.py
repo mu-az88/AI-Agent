@@ -7,10 +7,10 @@ load_dotenv()
 class FirecrawlService:
     """Thin wrapper around the Firecrawl API for searching and scraping web pages."""
 
-    def __init__(self):
-        """Connect to Firecrawl using the FIRECRAWL_API_KEY from the .env file."""
-        # Load the API key from the environment and fail fast if it's missing
-        api_key = os.getenv("FIRECRAWL_API_KEY")
+    def __init__(self, api_key: str | None = None):
+        """Connect to Firecrawl using the given key, or FIRECRAWL_API_KEY from the .env file."""
+        # Use the passed-in key, fall back to the environment, and fail fast if both are missing
+        api_key = api_key or os.getenv("FIRECRAWL_API_KEY")
         if not api_key:
             raise ValueError("missing FIRECRAWL_API_KEY")
         self.app = V1FirecrawlApp(api_key=api_key)

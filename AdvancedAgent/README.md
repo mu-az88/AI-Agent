@@ -1,6 +1,6 @@
 # AdvancedAgent: Developer Tools Research Agent
 
-A command-line AI agent that researches developer tools for you.
+An AI agent that researches developer tools for you. It runs in the terminal or as a Streamlit web app.
 
 You type a topic such as `vector databases` or `CI/CD tools`. The agent searches the web, works out which tools are worth looking at, reads each tool's website, and prints a short report with pricing, open-source status, supported languages, APIs, integrations and a final recommendation.
 
@@ -13,6 +13,7 @@ It is built with:
 | **Firecrawl** (`firecrawl-py`) | Searches the web and turns web pages into clean text (markdown) |
 | **Pydantic** | Defines the shape of the data passed between steps |
 | **python-dotenv** | Loads API keys from the `.env` file |
+| **Streamlit** | The web interface (`app.py`) |
 
 ---
 
@@ -51,7 +52,8 @@ For most production AI applications, Pinecone is the best choice because ...
 
 ```
 AdvancedAgent/
-├── main.py              # Entry point: the terminal loop that asks for queries and prints results
+├── main.py              # Terminal version: asks for queries and prints results
+├── app.py               # Web version: the same agent with a Streamlit interface
 ├── requirements.txt     # Python packages to install
 ├── .env                 # Your API keys (you create this; never share or commit it)
 └── src/
@@ -141,7 +143,7 @@ Turns every `CompanyInfo` into JSON, sends it to Gemini with the `RECOMMENDATION
 
 | Method | Purpose |
 |---|---|
-| `__init__` | Reads `FIRECRAWL_API_KEY` and stops with an error if it is missing |
+| `__init__` | Uses the key passed in, or `FIRECRAWL_API_KEY` from `.env`, and stops with an error if neither exists |
 | `search_companies(query, num_results)` | Web search. **Note:** it always appends `" company pricing"` to the query. Returns `[]` on error |
 | `scrape_company_pages(url)` | Downloads one page as markdown. Returns `None` on error |
 
@@ -175,13 +177,13 @@ To change how the agent "thinks", edit this file first.
 
 | Method | Purpose |
 |---|---|
-| `__init__` | Creates the Firecrawl service, the Gemini model and the prompts, then builds the graph |
+| `__init__` | Creates the Firecrawl service, the Gemini model and the prompts, then builds the graph. API keys can be passed in, otherwise they come from `.env` |
 | `_build_workflow` | Registers the 3 nodes, sets the entry point and connects them in order |
 | `_extract_tool_step` | Step 1 |
 | `_research_step` | Step 2 |
 | `_analyze_company_content` | Helper for step 2: structured analysis of one tool |
 | `_analyze_step` | Step 3 |
-| `run(query)` | Public entry point: runs the whole graph and returns the final `ResearchState` |
+| `run(query, on_step=None)` | Public entry point: runs the whole graph and returns the final `ResearchState`. The optional `on_step` function is called after each step, which is how the web app shows progress |
 
 ---
 
@@ -220,11 +222,62 @@ FIRECRAWL_API_KEY=your-firecrawl-key-here
 
 ### 4. Run
 
+**Terminal version:**
+
 ```powershell
 python main.py
 ```
 
-Run it **from inside the `AdvancedAgent` folder**, because `main.py` imports `src.workflow` and `.env` is loaded from the current folder.
+**Web version:**
+
+```powershell
+streamlit run app.py
+```
+
+This opens the app in your browser at http://localhost:8501.
+
+Run both **from inside the `AdvancedAgent` folder**, because they import `src.workflow` and `.env` is loaded from the current folder.
+
+---
+
+## The web app (`app.py`)
+
+The web app uses exactly the same `Workflow` as the terminal version. It only adds an interface on top:
+
+- **A search box.** Type a topic and click **Research**.
+- **Live progress.** A status box shows each step as it finishes, using the `on_step` callback of `Workflow.run`.
+- **Result cards.** One card per tool with pricing, open source, API, tech stack, languages and integrations, plus the recommendation at the top.
+- **Optional visitor API keys (sidebar).** When the app is public, every search costs API quota. Visitors can enter their own Gemini and Firecrawl keys for unlimited searches. Their keys are only used for that request and are not saved.
+- **A daily demo limit.** Visitors without keys share a small number of searches per day that use *your* keys (`DEMO_DAILY_LIMIT`, default 3). The counter is kept in memory, so it also resets whenever the app restarts.
+
+Two Streamlit ideas worth knowing:
+
+- Streamlit **reruns the whole script from top to bottom** on every click. That is why the result is saved in `st.session_state`, which survives reruns.
+- `@st.cache_resource` creates an object **once and shares it between all visitors**. The demo usage counter uses it.
+
+---
+
+## Deploying to Streamlit Community Cloud (free)
+
+1. Push the project to a **public GitHub repository**. Make sure `.env` is **not** pushed (it is in `.gitignore`).
+2. Go to https://share.streamlit.io and sign in with GitHub.
+3. Click **Create app** → **Deploy a public app from GitHub**, then fill in:
+   - **Repository:** your repo, e.g. `mu-az88/AI-Agent`
+   - **Branch:** `master`
+   - **Main file path:** `AdvancedAgent/app.py`
+4. Open **Advanced settings**:
+   - Choose **Python 3.12**.
+   - Paste your keys into **Secrets** (TOML format):
+     ```toml
+     GEMINI_API_KEY = "your-gemini-key-here"
+     FIRECRAWL_API_KEY = "your-firecrawl-key-here"
+     DEMO_DAILY_LIMIT = 3
+     ```
+5. Click **Deploy**. The first build takes a few minutes while the packages install from `requirements.txt`.
+
+You can change the secrets later in the app's **Settings → Secrets**. The app restarts automatically.
+
+To test secrets locally, you can put the same content in `AdvancedAgent/.streamlit/secrets.toml`. It is in `.gitignore` too. If that file doesn't exist, the app uses `.env` instead.
 
 ---
 
@@ -263,15 +316,16 @@ Keep this in mind on free plans.
 | `Direct use of automatic function calling (AFC) ... is not recommended` | An informational message from the Google library | Harmless |
 | `missing FIRECRAWL_API_KEY` | `.env` is missing or not in the current folder | Create `.env` and run from the `AdvancedAgent` folder |
 | `ModuleNotFoundError: No module named 'src'` | You ran `main.py` from a different folder | `cd` into `AdvancedAgent` first |
+| Web app: "Today's free demo searches are used up" | The daily demo limit was reached | Enter your own keys in the sidebar, or raise `DEMO_DAILY_LIMIT` in the secrets |
 | Irrelevant tools in the results | The scraped articles were off-topic, or the model misread them | Rephrase the query, or try a larger model |
 
-**Known limitation:** step 3 (`_analyze_step`) has no `try/except`. If Gemini fails there (e.g. quota exceeded), the whole program stops with a traceback. The other steps catch errors and keep going.
+Every step catches its own errors. If Gemini fails during the final recommendation (e.g. quota exceeded), the tool results are still shown with a short message in place of the recommendation.
 
 ---
 
 ## Ideas for practice
 
-1. Add a `try/except` around the LLM call in `_analyze_step` so a failure prints a message instead of crashing.
+1. Save the demo usage counter to a file or database, so it survives app restarts.
 2. Print `developer_experience_rating` and `competitors`. They exist in `CompanyInfo` but are never filled in, so add them to `CompanyAnalysis` and the prompt.
 3. Make the number of researched tools a setting instead of the hard-coded `[:4]`.
 4. Add a conditional edge in LangGraph that skips step 2 when step 1 finds nothing, instead of the fallback search.

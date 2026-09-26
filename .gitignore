@@ -9,3 +9,6 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+
+# Streamlit local secrets
+.streamlit/secrets.toml

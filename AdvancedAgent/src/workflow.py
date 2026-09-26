@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Optional
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -10,13 +10,16 @@ from src.prompts import DeveloperToolsPrompts
 class Workflow:
     """Orchestrates the full research pipeline: extract tools → research each tool → analyze → recommend."""
 
-    def __init__(self):
-        """Set up the web scraper, the Gemini model, the prompts, and the workflow graph."""
-        self.firecrawl = FirecrawlService()
+    def __init__(self, gemini_api_key: Optional[str] = None, firecrawl_api_key: Optional[str] = None):
+        """Set up the web scraper, the Gemini model, the prompts, and the workflow graph.
+
+        API keys can be passed in (the web app does this); otherwise they are read from .env.
+        """
+        self.firecrawl = FirecrawlService(api_key=firecrawl_api_key)
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-3.5-flash-lite",
-            google_api_key=os.getenv("GEMINI_API_KEY"),
-                    )
+            google_api_key=gemini_api_key or os.getenv("GEMINI_API_KEY"),
+        )
         self.prompt = DeveloperToolsPrompts()
         self.workflow = self._build_workflow()
 
@@ -152,11 +155,25 @@ class Workflow:
             HumanMessage(content=self.prompt.recommendations_user(state.query, company_data))
         ]
 
-        response = self.llm.invoke(messages)
-        return {"analysis": response.text}
+        try:
+            response = self.llm.invoke(messages)
+            return {"analysis": response.text}
+        except Exception as e:
+            print(e)
+            # Keep the tool results even if the final LLM call fails (e.g. quota exceeded)
+            return {"analysis": "Could not generate a recommendation. The AI model may be rate-limited, so please try again later."}
 
-    def run(self, query: str) -> ResearchState:
-        """Entry point — runs the full pipeline and returns the final state."""
-        initial_state = ResearchState(query=query)
-        final_state = self.workflow.invoke(initial_state)
-        return ResearchState(**final_state)
+    def run(self, query: str, on_step: Optional[Callable[[str, ResearchState], None]] = None) -> ResearchState:
+        """Entry point — runs the full pipeline and returns the final state.
+
+        on_step is optional: it is called after each step finishes with the step name and the
+        state so far. The web app uses it to show progress.
+        """
+        state = ResearchState(query=query).model_dump()
+        # stream() yields each step's output as soon as that step finishes
+        for update in self.workflow.stream(ResearchState(query=query), stream_mode="updates"):
+            for step_name, step_output in update.items():
+                state.update(step_output)
+                if on_step:
+                    on_step(step_name, ResearchState(**state))
+        return ResearchState(**state)

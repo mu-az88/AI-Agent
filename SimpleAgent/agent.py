@@ -95,6 +95,7 @@ Explain the result clearly after using a tool.
 # ============================================================
 
 def run_agent():
+    """Start a chat in the terminal. Gemini decides by itself when to call the tools above."""
 
     print("=================================")
     print("      Mini AI Agent")

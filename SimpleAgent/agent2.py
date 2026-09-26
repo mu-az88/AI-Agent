@@ -50,6 +50,10 @@ def calculator(expression: str) -> str:
 
 
 async def run_agent():
+    """Start the Firecrawl MCP server, load its web tools, and build an agent that can use them plus the calculator.
+
+    Note: the agent is created but not run yet. Next step is calling agent.ainvoke() with a user message.
+    """
     async with stdio_client(server_params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

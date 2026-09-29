@@ -10,5 +10,5 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Streamlit local secrets
-.streamlit/secrets.toml
+# Gradio local cache
+.gradio/

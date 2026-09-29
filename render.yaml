@@ -1,0 +1,24 @@
+# Render Blueprint: deploys the AdvancedAgent Gradio app as a free web service.
+# Setup steps are in AdvancedAgent/DEPLOY_RENDER.md.
+services:
+  - type: web
+    name: dev-tools-research-agent
+    runtime: python
+    plan: free
+    rootDir: AdvancedAgent            # the app lives in this subfolder
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    autoDeployTrigger: commit         # redeploy on every push to master
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"              # same as the local venv (Render's default is newer)
+      - key: GRADIO_SERVER_NAME
+        value: "0.0.0.0"              # listen on all interfaces, not only localhost
+      - key: GRADIO_SERVER_PORT
+        value: "10000"                # Render's default port
+      - key: DEMO_DAILY_LIMIT
+        value: "10"
+      - key: GEMINI_API_KEY
+        sync: false                   # Render asks for the value during setup; it is never stored in the repo
+      - key: FIRECRAWL_API_KEY
+        sync: false

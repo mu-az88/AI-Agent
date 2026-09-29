@@ -51,11 +51,13 @@ For most production AI applications, Pinecone is the best choice because ...
 ## Project structure
 
 ```
+render.yaml              # (repo root) Render deployment settings
 AdvancedAgent/
 ├── main.py              # Terminal version: asks for queries and prints results
 ├── app.py               # Web version: the same agent with a Gradio interface
 ├── ui_theme.py          # The web app's look: dark colour palette, fonts and rounded styling
-├── requirements.txt     # Python packages to install
+├── requirements.txt     # Python packages to install (exact versions)
+├── DEPLOY_RENDER.md     # Step-by-step plan for deploying to Render
 ├── .env                 # Your API keys (you create this; never share or commit it)
 └── src/
     ├── __init__.py      # Makes "src" a Python package so main.py can import from it
@@ -251,7 +253,7 @@ The web app uses exactly the same `Workflow` as the terminal version. It only ad
 - **Live progress.** A status box shows each step as it finishes, using the `on_step` callback of `Workflow.run`.
 - **Result cards.** One card per tool with pricing, open source, API, tech stack, languages and integrations, plus the recommendation at the top.
 - **Optional visitor API keys (sidebar).** When the app is public, every search costs API quota. Visitors can enter their own Gemini and Firecrawl keys for unlimited searches. Their keys are only used for that request and are not saved.
-- **A daily demo limit.** Visitors without keys share a small number of searches per day that use *your* keys (`DEMO_DAILY_LIMIT`, default 3). The counter is kept in memory, so it also resets whenever the app restarts.
+- **A daily demo limit.** Visitors without keys share a small number of searches per day that use *your* keys (`DEMO_DAILY_LIMIT`, default 3, set to 10 on Render). The counter is kept in memory, so it also resets whenever the app restarts.
 
 Two Gradio ideas worth knowing:
 
@@ -262,20 +264,37 @@ The demo usage counter is a normal module-level variable, so it is shared by eve
 
 ---
 
-## Deploying to Hugging Face Spaces (free)
+## Deploying to Render (free)
 
-Hugging Face Spaces is the easiest free host for Gradio apps.
+The app is deployed on [Render](https://render.com)'s free plan straight from this GitHub repo.
+The service is described in `render.yaml` at the root of the repo, so Render sets it up from that file (a "Blueprint").
+The full plan with the reasons behind each setting is in `DEPLOY_RENDER.md`.
 
-1. Sign in at https://huggingface.co and click **New Space**.
-2. Pick a name, choose **Gradio** as the SDK and the free **CPU basic** hardware, then create the Space.
-3. Upload `app.py`, `ui_theme.py`, `requirements.txt` and the whole `src/` folder to the Space (through **Files → Add file**, or by cloning the Space with git and pushing). Do **not** upload `.env`.
-4. Open the Space's **Settings → Variables and secrets** and add these as **secrets**:
-   - `GEMINI_API_KEY`
-   - `FIRECRAWL_API_KEY`
-   - `DEMO_DAILY_LIMIT` (optional, default 3)
-5. The Space builds and starts on its own. The first build takes a few minutes while the packages install from `requirements.txt`.
+1. Sign up at https://render.com **with GitHub** and give Render access to this repository.
+2. In the dashboard click **New → Blueprint** and pick the repository. Render reads `render.yaml`.
+3. Paste your `GEMINI_API_KEY` and `FIRECRAWL_API_KEY` when asked, and click **Apply**. Never commit these keys.
+4. The first build takes a few minutes while the packages install from `requirements.txt`.
+   After that, every push to `master` redeploys the app automatically.
 
-Spaces pass secrets to the app as environment variables, so `app.py` reads them with `os.getenv`, exactly like the values from `.env` when you run it locally.
+What `render.yaml` sets up:
+
+| Setting | Value | Why |
+|---|---|---|
+| `rootDir` | `AdvancedAgent` | The app lives in this subfolder of the repo |
+| `startCommand` | `python app.py` | Same command as running it locally |
+| `PYTHON_VERSION` | `3.12.10` | Same version as the local venv (Render's default is newer) |
+| `GRADIO_SERVER_NAME` / `GRADIO_SERVER_PORT` | `0.0.0.0` / `10000` | Gradio reads these, so it accepts outside connections on Render's port. No code change needed |
+| `DEMO_DAILY_LIMIT` | `10` | Free searches per day that use your keys |
+
+Render passes these to the app as environment variables, so `app.py` reads them with `os.getenv`, exactly like the values from `.env` when you run it locally.
+
+Things to know about the free plan:
+
+- The app **sleeps after 15 minutes** without visitors. The next visitor waits 30 to 60 seconds while it wakes up.
+- The demo counter is kept in memory, so it resets every time the app wakes up.
+- `requirements.txt` pins exact versions, so a new library release can't break the live app. Update them on purpose, test locally, then push.
+
+(Hugging Face Spaces used to be the usual free host for Gradio apps, but Gradio Spaces on free hardware now need a PRO subscription.)
 
 ---
 

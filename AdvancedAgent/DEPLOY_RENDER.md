@@ -1,6 +1,6 @@
 # Plan: deploy the research agent to Render (free tier)
 
-**Status:** steps 1–4 done; step 5 (push) in progress; step 6 is yours.
+**Status:** deployed and live at https://dev-tools-research-agent.onrender.com (steps 1–7 done; memory and cold-start checks are in step 7).
 **Goal:** a public URL where anyone can use the Gradio app, running on Render's free plan, built from the GitHub repo `mu-az88/AI-Agent`.
 
 ---

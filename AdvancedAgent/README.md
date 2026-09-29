@@ -2,6 +2,8 @@
 
 An AI agent that researches developer tools for you. It runs in the terminal or as a Gradio web app.
 
+**Try it live:** https://dev-tools-research-agent.onrender.com (free hosting, so the first visit after a quiet spell can take up to a minute to wake up)
+
 You type a topic such as `vector databases` or `CI/CD tools`. The agent searches the web, works out which tools are worth looking at, reads each tool's website, and prints a short report with pricing, open-source status, supported languages, APIs, integrations and a final recommendation.
 
 It is built with:

@@ -5,4 +5,4 @@ langgraph
 pydantic
 python-dotenv
 firecrawl-py
-streamlit
+gradio

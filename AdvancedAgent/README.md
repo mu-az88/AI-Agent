@@ -1,6 +1,6 @@
 # AdvancedAgent: Developer Tools Research Agent
 
-An AI agent that researches developer tools for you. It runs in the terminal or as a Streamlit web app.
+An AI agent that researches developer tools for you. It runs in the terminal or as a Gradio web app.
 
 You type a topic such as `vector databases` or `CI/CD tools`. The agent searches the web, works out which tools are worth looking at, reads each tool's website, and prints a short report with pricing, open-source status, supported languages, APIs, integrations and a final recommendation.
 
@@ -13,7 +13,7 @@ It is built with:
 | **Firecrawl** (`firecrawl-py`) | Searches the web and turns web pages into clean text (markdown) |
 | **Pydantic** | Defines the shape of the data passed between steps |
 | **python-dotenv** | Loads API keys from the `.env` file |
-| **Streamlit** | The web interface (`app.py`) |
+| **Gradio** | The web interface (`app.py`) |
 
 ---
 
@@ -53,7 +53,8 @@ For most production AI applications, Pinecone is the best choice because ...
 ```
 AdvancedAgent/
 ├── main.py              # Terminal version: asks for queries and prints results
-├── app.py               # Web version: the same agent with a Streamlit interface
+├── app.py               # Web version: the same agent with a Gradio interface
+├── ui_theme.py          # The web app's look: dark colour palette, fonts and rounded styling
 ├── requirements.txt     # Python packages to install
 ├── .env                 # Your API keys (you create this; never share or commit it)
 └── src/
@@ -231,10 +232,12 @@ python main.py
 **Web version:**
 
 ```powershell
-streamlit run app.py
+python app.py
 ```
 
-This opens the app in your browser at http://localhost:8501.
+Then open http://127.0.0.1:7860 in your browser. Stop the app with `Ctrl+C` in the terminal.
+
+If you want the app to reload automatically every time you save a file while you work on it, run `gradio app.py` instead.
 
 Run both **from inside the `AdvancedAgent` folder**, because they import `src.workflow` and `.env` is loaded from the current folder.
 
@@ -250,34 +253,29 @@ The web app uses exactly the same `Workflow` as the terminal version. It only ad
 - **Optional visitor API keys (sidebar).** When the app is public, every search costs API quota. Visitors can enter their own Gemini and Firecrawl keys for unlimited searches. Their keys are only used for that request and are not saved.
 - **A daily demo limit.** Visitors without keys share a small number of searches per day that use *your* keys (`DEMO_DAILY_LIMIT`, default 3). The counter is kept in memory, so it also resets whenever the app restarts.
 
-Two Streamlit ideas worth knowing:
+Two Gradio ideas worth knowing:
 
-- Streamlit **reruns the whole script from top to bottom** on every click. That is why the result is saved in `st.session_state`, which survives reruns.
-- `@st.cache_resource` creates an object **once and shares it between all visitors**. The demo usage counter uses it.
+- **Events connect components to Python functions.** `gr.on(triggers=[research_button.click, query.submit], fn=research, ...)` means "when the button is clicked or Enter is pressed, call `research` with these inputs and put its return values into these outputs".
+- **Generator functions stream updates.** `research` uses `yield` instead of `return`, and every `yield` updates the page straight away. The workflow runs in a background thread and sends each finished step through a queue, so `research` can keep yielding progress while the agent works.
+
+The demo usage counter is a normal module-level variable, so it is shared by every visitor. Gradio also queues requests, so if several people search at once they wait in line and see their position in the queue.
 
 ---
 
-## Deploying to Streamlit Community Cloud (free)
+## Deploying to Hugging Face Spaces (free)
 
-1. Push the project to a **public GitHub repository**. Make sure `.env` is **not** pushed (it is in `.gitignore`).
-2. Go to https://share.streamlit.io and sign in with GitHub.
-3. Click **Create app** → **Deploy a public app from GitHub**, then fill in:
-   - **Repository:** your repo, e.g. `mu-az88/AI-Agent`
-   - **Branch:** `master`
-   - **Main file path:** `AdvancedAgent/app.py`
-4. Open **Advanced settings**:
-   - Choose **Python 3.12**.
-   - Paste your keys into **Secrets** (TOML format):
-     ```toml
-     GEMINI_API_KEY = "your-gemini-key-here"
-     FIRECRAWL_API_KEY = "your-firecrawl-key-here"
-     DEMO_DAILY_LIMIT = 3
-     ```
-5. Click **Deploy**. The first build takes a few minutes while the packages install from `requirements.txt`.
+Hugging Face Spaces is the easiest free host for Gradio apps.
 
-You can change the secrets later in the app's **Settings → Secrets**. The app restarts automatically.
+1. Sign in at https://huggingface.co and click **New Space**.
+2. Pick a name, choose **Gradio** as the SDK and the free **CPU basic** hardware, then create the Space.
+3. Upload `app.py`, `ui_theme.py`, `requirements.txt` and the whole `src/` folder to the Space (through **Files → Add file**, or by cloning the Space with git and pushing). Do **not** upload `.env`.
+4. Open the Space's **Settings → Variables and secrets** and add these as **secrets**:
+   - `GEMINI_API_KEY`
+   - `FIRECRAWL_API_KEY`
+   - `DEMO_DAILY_LIMIT` (optional, default 3)
+5. The Space builds and starts on its own. The first build takes a few minutes while the packages install from `requirements.txt`.
 
-To test secrets locally, you can put the same content in `AdvancedAgent/.streamlit/secrets.toml`. It is in `.gitignore` too. If that file doesn't exist, the app uses `.env` instead.
+Spaces pass secrets to the app as environment variables, so `app.py` reads them with `os.getenv`, exactly like the values from `.env` when you run it locally.
 
 ---
 

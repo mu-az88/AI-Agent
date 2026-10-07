@@ -11,11 +11,22 @@ It is built with:
 | Library | What it does in this project |
 |---|---|
 | **Gemini** (through `langchain-google-genai`) | The LLM that reads web pages and writes the answers |
+| **LangChain** (`langchain`, `langchain-core`) | Message types (`SystemMessage`, `HumanMessage`) and structured output (`with_structured_output`) |
 | **LangGraph** | Connects the steps of the agent into a workflow |
 | **Firecrawl** (`firecrawl-py`) | Searches the web and turns web pages into clean text (markdown) |
 | **Pydantic** | Defines the shape of the data passed between steps |
 | **python-dotenv** | Loads API keys from the `.env` file |
 | **Gradio** | The web interface (`app.py`) |
+
+### The agent's tools
+
+The agent works with three capabilities. It does **not** use LLM tool calling (where the model decides which tool to call next). The code calls each tool in a fixed order, and the model only reads text and writes answers:
+
+| Tool | Provided by | Used for |
+|---|---|---|
+| **Web search** | Firecrawl `search` (`FirecrawlService.search_companies`) | Finding comparison articles (step 1) and each tool's official site (step 2) |
+| **Web scraping** | Firecrawl `scrape_url` (`FirecrawlService.scrape_company_pages`) | Turning a web page into markdown text the LLM can read |
+| **LLM reasoning** | Gemini `gemini-3.5-flash-lite` (`ChatGoogleGenerativeAI`) | Picking tool names out of articles (free text), filling in a structured form per tool (structured output), writing the final recommendation (free text) |
 
 ---
 
@@ -128,6 +139,11 @@ If this step fails or finds nothing, `extracted_tools` stays empty.
    - Calls `_analyze_company_content`, which asks Gemini to fill in a `CompanyAnalysis` form (pricing, open source, tech stack, API, languages, integrations, description).
 3. Saves each result as a `CompanyInfo` object.
 
+Edge cases:
+
+- If the official-site search returns nothing, that tool is **dropped** from the results.
+- If the site can't be scraped, the tool is kept with only its name, URL and the search snippet as its description. Pricing and the other fields stay empty.
+
 **Structured output** is the important idea here. `self.llm.with_structured_output(CompanyAnalysis)` tells Gemini to reply with data that exactly matches the Pydantic model, not free text. You get a real Python object back (`analysis.pricing_model`, `analysis.api_available`, ...) with no text parsing.
 
 If the analysis fails, a safe default is used with the description set to `ANALYSIS_FAILED`, and `main.py` hides that description when printing.
@@ -144,7 +160,20 @@ Turns every `CompanyInfo` into JSON, sends it to Gemini with the `RECOMMENDATION
 
 ## The files in more detail
 
+### `main.py`: terminal version
+
+| Name | Purpose |
+|---|---|
+| `load_dotenv()` | Loads `GEMINI_API_KEY` and `FIRECRAWL_API_KEY` from `.env` |
+| `main()` | Creates one `Workflow`, then loops: reads a query, runs it and prints each tool (top 5 tech stack items, top 5 languages, top 4 integrations) followed by the recommendation. `exit` or `quit` stops it |
+
+### `src/__init__.py`
+
+Empty file. It makes `src` a package so `from src.workflow import Workflow` works.
+
 ### `src/firecrawl.py`: `FirecrawlService`
+
+It uses `V1FirecrawlApp`, the client for Firecrawl's v1 API that ships with `firecrawl-py` 4.x.
 
 | Method | Purpose |
 |---|---|
@@ -161,7 +190,7 @@ Both methods catch errors and return an empty result instead of crashing, so one
 | `ANALYSIS_FAILED` | Shared text used when analysis fails, so `workflow.py` and `main.py` always agree |
 | `CompanyAnalysis` | The "form" Gemini fills in for one tool (structured output) |
 | `CompanyInfo` | Everything known about one tool (search result + analysis) |
-| `ResearchState` | The shared state passed through the workflow |
+| `ResearchState` | The shared state passed through the workflow (`search_results` is declared but never used) |
 
 ### `src/prompts.py`: `DeveloperToolsPrompts`
 
@@ -189,6 +218,44 @@ To change how the agent "thinks", edit this file first.
 | `_analyze_company_content` | Helper for step 2: structured analysis of one tool |
 | `_analyze_step` | Step 3 |
 | `run(query, on_step=None)` | Public entry point: runs the whole graph and returns the final `ResearchState`. The optional `on_step` function is called after each step, which is how the web app shows progress |
+
+`run` uses `self.workflow.stream(..., stream_mode="updates")` instead of `invoke`, so it gets each node's output as soon as that node finishes and can merge it into its own copy of the state.
+
+### `app.py`: Gradio web app
+
+| Name | Purpose |
+|---|---|
+| `get_owner_key(name)` | Reads one of the app owner's settings from the environment (`.env` locally, Render environment variables when deployed) |
+| `DEMO_DAILY_LIMIT` | Searches per day allowed on the owner's keys (env var, default 3) |
+| `demo_usage` | In-memory counter `{date, count, lock}` shared by every visitor. The lock keeps simultaneous requests from miscounting |
+| `demo_runs_left()` | Searches left today. Resets the counter when the date changes |
+| `use_demo_run()` | Uses up one demo search. Returns `False` if the limit is reached |
+| `key_status(gemini, firecrawl)` | Sidebar text: "using your keys" or "N of M free searches left" |
+| `format_company(company)` | Builds one tool's markdown card: name, link, a pricing / open source / API table, description, stack, languages, integrations. Escapes `\|` so values can't break the table |
+| `card(markdown, css_class)` | Wraps markdown in a `<div>` so it gets the rounded card style |
+| `format_result(result)` | Full results: recommendation card first, then one card per tool, or a warning if no tools were found |
+| `research(query, gemini, firecrawl)` | The event handler (a generator). It validates input, chooses visitor or owner keys, enforces the demo limit, runs `Workflow` in a background thread, and yields progress, results, key status and button state as each step finishes |
+| `demo` (`gr.Blocks`) | The layout: sidebar with two password fields for keys, hero header, search bar, terminal-style progress box, results area and footer. Two `gr.on` events connect it to `research` and `key_status` |
+
+`demo.launch(theme=THEME, css=CSS, js=FORCE_DARK_JS)` starts the server on port 7860, or on the host and port in `GRADIO_SERVER_NAME` / `GRADIO_SERVER_PORT`.
+
+### `ui_theme.py`: web app styling
+
+| Name | Purpose |
+|---|---|
+| Palette constants (`BG`, `SURFACE`, `GREEN`, `CYAN`, `VIOLET`, ...) | Colours for a dark "terminal" look with a phosphor-green accent |
+| `dark_everywhere(**variables)` | Sets each Gradio theme variable *and* its `_dark` variant to the same value, so the app looks the same whatever the visitor's system theme is |
+| `THEME` | A `gr.themes.Base` theme: Inter and JetBrains Mono fonts, rounded blocks, pill buttons with a green-to-cyan gradient, dark inputs and tables |
+| `CSS` | Extra styles: fixed page width (stops the sidebar overlapping the search bar), hero header, search bar, the `agent.log` terminal window, result cards, a highlighted recommendation card, sidebar, footer and a phone layout |
+| `FORCE_DARK_JS` | Adds the `dark` class to the page so Gradio's built-in components also use dark mode |
+
+### `requirements.txt`
+
+Exact versions of the 7 packages the app is tested with: `gradio`, `langchain`, `langchain-google-genai`, `langgraph`, `pydantic`, `python-dotenv` and `firecrawl-py`. They are pinned so the deployed app can't break when a new version comes out.
+
+### `DEPLOY_RENDER.md` and `render.yaml`
+
+`render.yaml` (in the repo root) is the Render Blueprint that describes the web service. `DEPLOY_RENDER.md` is the step-by-step deployment plan with the reasons behind each setting. Both are summarised in [Deploying to Render](#deploying-to-render-free) below.
 
 ---
 
@@ -349,4 +416,4 @@ Every step catches its own errors. If Gemini fails during the final recommendati
 3. Make the number of researched tools a setting instead of the hard-coded `[:4]`.
 4. Add a conditional edge in LangGraph that skips step 2 when step 1 finds nothing, instead of the fallback search.
 5. Save each report to a markdown file as well as printing it.
-6. `langchain-openai` is listed in `requirements.txt` but never used. Try adding an option to switch between Gemini and OpenAI.
+6. Add an option to switch between Gemini and another provider (e.g. install `langchain-openai` and use `ChatOpenAI`). Only `Workflow.__init__` needs to change.
